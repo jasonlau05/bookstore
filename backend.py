@@ -354,7 +354,7 @@ def get_orderitems(order_id):
                 b.Name AS Title,
                 CASE 
                     WHEN oi.OrderType = 'buy' THEN b.Buyprice
-                    WHEN oi.OrderType = 'rent' THEN b.Rentprice
+                    WHEN oi.OrderType IN ('rent', 'returned') THEN b.Rentprice
                     ELSE NULL
                 END AS Price
             FROM OrderItems oi
@@ -565,6 +565,51 @@ def update_rating(book_id):
     conn.close()
     return jsonify({'message': 'Review saved.'}), 201
 
+@app.route('/orderitem/<int:item_id>', methods=['PUT'])
+@require_auth(manager_only=True)
+def returned(item_id):
+    data = request.get_json()
+
+    if 'ordertype' not in data:
+        return jsonify({'message': 'Missing ordertype field'}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'message': 'Database unavailable'}), 500
+
+    cursor = conn.cursor()
+
+    try:
+        query = """
+            UPDATE OrderItems 
+            SET OrderType = %s 
+            WHERE ItemID = %s
+        """
+
+        cursor.execute(query, (data['ordertype'], item_id))
+
+        if cursor.rowcount == 0:
+            return jsonify({
+                'message': f'No rental order for Book ID {book_id} found.'
+            }), 404
+
+        return_stock = """
+            UPDATE Books 
+            SET Quantity = Quantity + 1
+            WHERE BookID = %s
+        """
+        cursor.execute(return_stock, (item_id,))
+
+        conn.commit()
+
+        return jsonify({'message': 'Order marked as returned'}), 200
+    
+    except mysql.connector.Error as err:
+        conn.rollback()
+        return jsonify({'message': f'Database error: {err}'}), 500
+    
+    finally:
+        conn.close()
 
 if __name__ == '__main__':
     print("Starting Flask API Server on http://127.0.0.1:5000...")

@@ -476,7 +476,7 @@ class OrdersFrame(ttk.Frame):
         for row in self.tree.get_children():
             self.tree.delete(row)
 
-        response = requests.get(f"{API_BASE_URL}/orders")
+        response = requests.get(f"{API_BASE_URL}/orders", headers={'Authorization': f'Bearer {self.controller.get_auth_token()}'})
         if response.status_code == 200:
             for order in response.json():
                 self.tree.insert("", "end", values=(
@@ -631,7 +631,7 @@ class MyOrdersFrame(ttk.Frame):
         user_id = self.controller.user_id
 
         def task():
-            return requests.get(f"{API_BASE_URL}/orders/{user_id}")
+            return requests.get(f"{API_BASE_URL}/orders/{user_id}", headers={'Authorization': f'Bearer {self.controller.get_auth_token()}'})
 
         def done(response, error):
             if response.status_code == 200:
@@ -650,7 +650,7 @@ class MyOrdersFrame(ttk.Frame):
         try:
             # Use an endpoint that returns profile summary data
             def task():
-                return requests.get(f"{API_BASE_URL}/profile/{user_id}", timeout=5) 
+                return requests.get(f"{API_BASE_URL}/profile/{user_id}", headers = {'Authorization': f'Bearer {self.controller.get_auth_token()}'}) 
             
             def done(response, error):
                 if response.status_code == 200:
@@ -689,7 +689,7 @@ class MyOrdersFrame(ttk.Frame):
         try:
 
             def task():
-                return requests.get(f"{API_BASE_URL}/profile/{user_id}") 
+                return requests.get(f"{API_BASE_URL}/profile/{user_id}", headers = {'Authorization': f'Bearer {auth_header_value}'}) 
             
             def done(response, error):
                 if response.status_code == 200:
@@ -899,15 +899,15 @@ class OrderDetailsFrame(ttk.Frame):
         # Title
         ttk.Label(self, text="Order Details", font=('Arial', 16, 'bold')).pack(pady=20)
 
-        columns = ("BookID", "Title", "OrderType", "Price")
+        columns = ("ItemID", "Title", "OrderType", "Price")
         self.tree = ttk.Treeview(self, columns=columns, show='headings')
 
-        self.tree.heading('BookID', text='Book ID')
+        self.tree.heading('ItemID', text='Item ID')
         self.tree.heading('Title', text='Title')
         self.tree.heading('OrderType', text='Status')
         self.tree.heading('Price', text='Price')
 
-        self.tree.column('BookID', width=80)
+        self.tree.column('ItemID', width=80)
         self.tree.column('Title', width=250)
         self.tree.column('OrderType', width=80)
         self.tree.column('Price', width=100)
@@ -928,6 +928,9 @@ class OrderDetailsFrame(ttk.Frame):
         ttk.Button(button_frame, text="back", command=lambda: controller.show_frame(OrdersFrame)).pack(side='left', padx=10)
         
     def load_items(self):
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+            
         for item in self.items:
             self.tree.insert("", "end", values=(
                 item.get('BookID'),
@@ -962,14 +965,14 @@ class OrderDetailsFrame(ttk.Frame):
 
             def task():
                 return requests.put(
-                    f"{API_BASE_URL}/book/{book_id}", 
-                    json={"status": "returned"},
+                    f"{API_BASE_URL}/orderitem/{book_id}", 
+                    json={"ordertype": "returned"},
                     headers=headers
                 )
 
             def done(response, error):
                 if response.status_code == 200:
-                    self.load_items()
+                    self.refreshapi()
                 else:
                     # Handle API errors
                     error_message = response.json().get('message', 'Unknown API Error')
@@ -979,6 +982,26 @@ class OrderDetailsFrame(ttk.Frame):
 
         except requests.exceptions.RequestException as e:
             messagebox.showerror("Network Error", f"Could not connect to the API server: {e}")
+        
+    def refreshapi(self):
+        auth_header_value = self.controller.get_auth_token()
+        headers = {'Authorization': f'Bearer {auth_header_value}'}
+
+        def task():
+            return requests.get(f"{API_BASE_URL}/orderitems/{self.order_id}", headers=headers)
+
+        def done(response, error):
+            if error or response is None:
+                messagebox.showerror("Error", "Failed to refresh items.")
+                return
+
+            if response.status_code == 200:
+                self.items = response.json()
+                self.load_items()
+            else:
+                messagebox.showerror("Error", f"Failed to reload. Status: {response.status_code}")
+
+        self.controller.run_async(task, done)
 
 class MyOrderDetailsFrame(ttk.Frame):
     def __init__(self, parent, controller, order_id, items):
