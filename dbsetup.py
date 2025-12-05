@@ -1,12 +1,8 @@
 import mysql.connector
 
-lines = open('creds.txt').read().splitlines()
-DBUSER = lines[0]
-DBPASS = lines[1]
-
 DB_CONFIG = {
-    'user': DBUSER,
-    'password': DBPASS,
+    'user': 'root',
+    'password': 'pass',
     'host': '127.0.0.1',
     'raise_on_warnings': True
 }
@@ -85,7 +81,8 @@ CREATE TABLE Books (
     Author varchar(255) not null,
     Buyprice DECIMAL(10,2) NOT NULL,
     Rentprice decimal(10,2) not null,
-    Status varchar(50) not null
+    Status varchar(50) not null,
+    Quantity int not null
 );
 
 CREATE TABLE Orders (
@@ -102,15 +99,23 @@ create table OrderItems (
     Price decimal(10,2) not null
 );
 
+create table Ratings (
+    RatingID int auto_increment primary key,
+    CustomerID int not null,
+    BookID int not null,
+    Rating int not null,
+    Comments varchar(255)
+);
+
 INSERT INTO Users (UserName, Password, Email, Manager) VALUES
 ('admin', '$2b$12$p4hMGKZ.YuzAyX73DgqbP.9rISmVz3ljkNSuZFRmJGCuzRBPp/bIu', 'Jason', TRUE),
 ('nimda', '$2b$12$0HSurjZan.kVEE0.JyLVxes9r85l89NYxuprrj/4WyoeYtSzlSrI2', 'eric', FALSE);
 
-insert into Books (Name, Author, Buyprice, Rentprice, Status) values
-('The Great Gatsby', 'F. Scott Fitzgerald', 15.99, 5.00, 'in stock'),
-('1984', 'George Orwell', 12.50, 4.50, 'rented'),
-('To Kill a Mockingbird', 'Harper Lee', 18.00, 6.00, 'sold'),
-('Pride and Prejudice', 'Jane Austen', 10.99, 3.50, 'rented');
+insert into Books (Name, Author, Buyprice, Rentprice, Status, Quantity) values
+('The Great Gatsby', 'F. Scott Fitzgerald', 15.99, 5.00, 'in stock', 67),
+('1984', 'George Orwell', 12.50, 4.50, 'rented', 0),
+('To Kill a Mockingbird', 'Harper Lee', 18.00, 6.00, 'sold', 78),
+('Pride and Prejudice', 'Jane Austen', 10.99, 3.50, 'rented', 21);
 
 insert into Orders (CustomerID, TotalCost, Status) values
 (1, 50.45, 'pending'),
@@ -119,8 +124,12 @@ insert into Orders (CustomerID, TotalCost, Status) values
 insert into OrderItems (OrderID, ItemID, OrderType, Price) values
 (1, 1, 'rent', 67),
 (1, 2, 'buy', 69),
-(2,1, 'buy', 10),
+(2, 1, 'buy', 10),
 (2,100, 'rent', 5.44);
+
+insert into Ratings (CustomerID, BookID, Rating, Comments) values
+(1, 1, 4, "this is the best book ever!!11!"),
+(2, 1, 2, "what even is this?? I hate it");
 """
     # write to file
     with open("bookstore.sql", "w") as f:

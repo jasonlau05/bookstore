@@ -1,20 +1,18 @@
 from flask import Flask, jsonify, request
 import mysql.connector
 from flask_bcrypt import Bcrypt
+import jwt
+import datetime
+from functools import wraps
 
 app = Flask(__name__)
 bcrypt = Bcrypt(app)
 
-lines = open('creds.txt').read().splitlines()
-DBUSER = lines[0]
-DBPASS = lines[1]
-DBNAME = lines[2]
-
 DB_CONFIG = {
-    'user': DBUSER,
-    'password': DBPASS,
+    'user': 'root',
+    'password': 'pass',
     'host': '127.0.0.1',
-    'database': DBNAME
+    'database': 'bookstore'
 }
 
 def get_db_connection():
@@ -29,8 +27,44 @@ def get_db_connection():
 def hash_password(password):
     return bcrypt.generate_password_hash(password).decode('utf-8')
 
+SECRET_KEY = "thisisunhackable123"
+
 def check_password(hashed_password, password_attempt):
     return bcrypt.check_password_hash(hashed_password, password_attempt)
+
+def require_auth(manager_only=False, customer_only=False):
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            auth_header = request.headers.get("Authorization")
+            if not auth_header:
+                return jsonify({"message": "Authorization required"}), 403
+
+            # Expect "Bearer <token>"
+            if not auth_header.startswith("Bearer "):
+                return jsonify({"message": "Invalid token format"}), 401
+
+            # Extract the real JWT
+            token = auth_header.split(" ")[1]
+
+            try:
+                decoded = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            except jwt.ExpiredSignatureError:
+                return jsonify({"message": "Token expired"}), 401
+            except jwt.InvalidTokenError:
+                return jsonify({"message": "Invalid token"}), 401
+
+            # Access control checks:
+            if manager_only and not decoded.get("manager"):
+                return jsonify({"message": "managers only"}), 403
+
+            if customer_only and decoded.get("manager"):
+                return jsonify({"message": "customers only"}), 403
+
+            request.user = decoded
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # api endpoints
 
@@ -62,7 +96,16 @@ def login():
         if not ok:
             return jsonify({'message': 'Invalid credentials'}), 401
 
-        token = str(user['UserID'])
+       
+        payload = {
+            "user_id": user["UserID"],
+            "username": user["UserName"],
+            "manager": user["Manager"],
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=6)
+        }
+
+        token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
         return jsonify({
             'success': True,
             'message': f"Welcome, {user['Email']}!",
@@ -78,6 +121,7 @@ def login():
         return jsonify({'message': 'Internal server error', 'error': str(e)}), 500
 
 @app.route('/books', methods=['GET'])
+@require_auth()
 def get_books():
     conn = get_db_connection()
     if not conn:
@@ -89,7 +133,7 @@ def get_books():
     search_query = request.args.get("query")
 
     query = """
-        SELECT BookID, Name, Author, Buyprice, Rentprice, Status
+        SELECT BookID, Name, Author, Buyprice, Rentprice, Status, Quantity
         FROM Books
         WHERE 1 = 1
     """
@@ -107,6 +151,7 @@ def get_books():
     return jsonify(books), 200
 
 @app.route('/book', methods=['POST'])
+@require_auth(manager_only=True)
 def add_book():
     data = request.get_json()
     name = data.get('name')
@@ -114,12 +159,7 @@ def add_book():
     buy_price = data.get('buy_price')
     rent_price = data.get('rent_price')
     status='in stock'
-    auth_token = request.headers.get('Authorization') # Simple check
-
-    # In a real app, we'd validate the token and check user permissions.
-    # For this demo, we check if the token exists (i.e., user logged in).
-    if not auth_token:
-        return jsonify({'message': 'Authorization required'}), 403
+    quantity = data.get('quantity')
 
     if not all([name, author, buy_price, rent_price]):
         return jsonify({'message': 'Missing book data'}), 400
@@ -130,8 +170,8 @@ def add_book():
 
     cursor = conn.cursor()
     try:
-        query = "INSERT INTO Books (Name, Author, Buyprice, Rentprice, Status) VALUES (%s, %s, %s, %s, %s)"
-        cursor.execute(query, (name, author, buy_price, rent_price, status))
+        query = "INSERT INTO Books (Name, Author, Buyprice, Rentprice, Status, Quantity) VALUES (%s, %s, %s, %s, %s, %s)"
+        cursor.execute(query, (name, author, buy_price, rent_price, status, quantity))
         conn.commit()
         return jsonify({'message': f'Book "{name}" added successfully!'}), 201
     except mysql.connector.Error as err:
@@ -141,19 +181,17 @@ def add_book():
         conn.close()
 
 @app.route('/book/<int:book_id>', methods=['PUT'])
+@require_auth(manager_only=True)
 def update_book(book_id):
     data = request.get_json()
-    auth_token = request.headers.get('Authorization')
-
-    if not auth_token:
-        return jsonify({'message': 'Authorization required'}), 403
 
     allowed_fields = {
         'name': 'Name',
         'author': 'Author',
         'buyprice': 'Buyprice',
         'rentprice': 'Rentprice',
-        'status': 'Status'
+        'status': 'Status',
+        'quantity': 'Quantity'
     }
     
     set_clauses = []
@@ -225,6 +263,7 @@ def register():
         conn.close()
 
 @app.route('/orders', methods=['GET'])
+@require_auth(manager_only=True)
 def get_orders():
     conn = get_db_connection()
     if not conn:
@@ -239,6 +278,7 @@ def get_orders():
     return jsonify(orders), 200
 
 @app.route('/orders/<int:user_id>', methods=['GET'])
+@require_auth(customer_only=True)
 def get_myorders(user_id):
     
     conn = get_db_connection()
@@ -254,12 +294,9 @@ def get_myorders(user_id):
     return jsonify(orders), 200
 
 @app.route('/order/<int:order_id>', methods=['PUT'])
+@require_auth()
 def update_order(order_id):
     data = request.get_json()
-    auth_token = request.headers.get('Authorization')
-
-    if not auth_token:
-        return jsonify({'message': 'Authorization required'}), 403
 
     allowed_fields = {
         'status': 'Status'
@@ -300,10 +337,8 @@ def update_order(order_id):
         conn.close()
 
 @app.route('/orderitems/<int:order_id>', methods=['GET'])
+@require_auth()
 def get_orderitems(order_id):
-    auth_token = request.headers.get('Authorization')
-    if not auth_token:
-        return jsonify({'message': 'Authorization required'}), 403
 
     conn = get_db_connection()
     if not conn:
@@ -344,12 +379,9 @@ def get_orderitems(order_id):
         conn.close()
 
 @app.route('/order', methods=['POST'])
+@require_auth(customer_only=True)
 def create_order():
     data = request.get_json()
-    auth_token = request.headers.get('Authorization')
-    
-    if not auth_token:
-        return jsonify({'message': 'Authorization required'}), 403
     
     user_id = data.get('user_id')
     items = data.get('items')
@@ -380,18 +412,15 @@ def create_order():
             book_id = item['book_id']
             price = item['price']
             transaction = item['type']
+
+            # reduce quantity
+            qty_query = "UPDATE Books SET Quantity = Quantity - 1 WHERE BookID = %s AND Quantity > 0"
+            cursor.execute(qty_query, (book_id,))
             
             # insert
             item_query = "INSERT INTO OrderItems (OrderID, ItemID, OrderType, Price) VALUES (%s, %s, %s, %s)"
             cursor.execute(item_query, (order_id, book_id, transaction, price))
-            
-            # update status
-            if transaction == 'rent':
-                status_query = "UPDATE Books SET Status = 'rented' WHERE BookID = %s"
-                cursor.execute(status_query, (book_id,))
-            if transaction == 'buy':
-                status_query = "UPDATE Books SET Status = 'sold' WHERE BookID = %s"
-                cursor.execute(status_query, (book_id,))
+
             
         conn.commit()
         return jsonify({'message': 'Order successfully placed.', 'order_id': order_id, 'total_cost': total_cost}), 201
@@ -408,6 +437,133 @@ def create_order():
     finally:
         cursor.close()
         conn.close()
+
+@app.route('/profile/<int:user_id>', methods=['GET'])
+@require_auth(customer_only=True)
+def get_profile(user_id):
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection failed"}), 500
+
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        query = """
+        SELECT
+            COUNT(OrderID) AS TotalOrders,
+            SUM(TotalCost) AS TotalSpent
+        FROM Orders WHERE CustomerID = %s;
+        """
+        
+        cursor.execute(query, (user_id,))
+        result = cursor.fetchone()
+
+        if result and result['TotalOrders'] is not None:
+            # Successfully retrieved data
+            total_orders = int(result['TotalOrders'])
+            # Ensure TotalSpent is a float, defaulting to 0.00 if NULL
+            total_spent = float(result['TotalSpent']) if result['TotalSpent'] is not None else 0.00
+            
+            # You could add other profile data here, e.g.,
+            # fetch user details from a separate Users table.
+            
+            profile_data = {
+                "CustomerID": user_id,
+                "TotalOrders": total_orders,
+                # Format TotalSpent to two decimal places for currency
+                "TotalSpent": f"{total_spent:.2f}", 
+                # Placeholder for AccountCreated, which you might fetch later
+                "AccountCreated": "2023-01-01" 
+            }
+            
+            return jsonify(profile_data), 200
+        else:
+            # User has no completed orders yet
+            return jsonify({
+                "CustomerID": user_id,
+                "TotalOrders": 0,
+                "TotalSpent": "0.00",
+                "AccountCreated": "N/A"
+            }), 200
+
+
+    except mysql.connector.Error as err:
+        print(f"Database query error: {err}")
+        return jsonify({"message": f"An error occurred during data retrieval: {err}"}), 500
+        
+    finally:
+        # Close the cursor and connection
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+@app.route('/rating/<int:book_id>', methods=['GET'])
+@require_auth()
+def get_ratings(book_id):
+    
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'message': 'Database unavailable'}), 500
+
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT Rating, Comments FROM Ratings where BookID = %s"
+    cursor.execute(query, (book_id,))
+    orders = cursor.fetchall()
+    conn.close()
+
+    return jsonify(orders), 200
+
+@app.route('/rating', methods=['POST'])
+@require_auth()
+def create_rating():
+    data = request.get_json()
+
+    book_id = data.get('book_id')
+    customer_id = data.get('customer_id')
+    rating = data.get('rating')
+    comments = data.get('comments', '')
+
+    if not all([book_id, customer_id, rating]):
+        return jsonify({'message': 'Missing required fields'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = """
+    INSERT INTO Ratings (BookID, CustomerID, Rating, Comments)
+    VALUES (%s, %s, %s, %s)
+    """
+    cursor.execute(query, (book_id, customer_id, rating, comments))
+    conn.commit()
+    conn.close()
+
+    return jsonify({'message': 'Review submitted successfully'}), 201
+
+@app.route('/rating/<int:book_id>', methods=['PUT'])
+@require_auth()
+def update_rating(book_id):
+    data = request.get_json()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # check if record exists
+    cursor.execute("SELECT 1 FROM Ratings WHERE BookID = %s", (book_id,))
+    exists = cursor.fetchone()
+
+    if exists:
+        # UPDATE existing
+        query = "UPDATE Ratings SET Rating = %s, Comments = %s WHERE BookID = %s"
+        cursor.execute(query, (data['rating'], data['comments'], book_id))
+    else:
+        # INSERT new
+        query = "INSERT INTO Ratings (BookID, Rating, Comments) VALUES (%s, %s, %s)"
+        cursor.execute(query, (book_id, data['rating'], data['comments']))
+
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Review saved.'}), 201
 
 
 if __name__ == '__main__':
