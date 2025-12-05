@@ -129,11 +129,13 @@ def get_books():
 
     cursor = conn.cursor(dictionary=True)
 
-    # Read ?query= from URL
+    # read query, genre, or year from URL
     search_query = request.args.get("query")
+    genre_filter = request.args.get("genre")
+    year_filter = request.args.get("year")
 
     query = """
-        SELECT BookID, Name, Author, Buyprice, Rentprice, Status, Quantity
+        SELECT BookID, Name, Author, Buyprice, Rentprice, Status, Quantity, Genre, PublicationYear
         FROM Books
         WHERE 1 = 1
     """
@@ -143,6 +145,18 @@ def get_books():
         query += " AND (Name LIKE %s OR Author LIKE %s)"
         pattern = f"%{search_query}%"
         params.extend([pattern, pattern])
+
+    if genre_filter:
+        query += " AND Genre = %s"
+        params.append(genre_filter)
+
+    if year_filter:
+        try:
+            int(year_filter)
+            query += " AND PublicationYear = %s"
+            params.append(year_filter)
+        except ValueError:
+            pass
 
     cursor.execute(query, params)
     books = cursor.fetchall()
@@ -158,6 +172,8 @@ def add_book():
     author = data.get('author')
     buy_price = data.get('buy_price')
     rent_price = data.get('rent_price')
+    genre = data.get('genre')
+    publication_year = data.get('publication_year')
     status='in stock'
     quantity = data.get('quantity')
 
@@ -270,7 +286,16 @@ def get_orders():
         return jsonify({'message': 'Database unavailable'}), 500
 
     cursor = conn.cursor(dictionary=True)
-    query = "SELECT OrderID, CustomerID, TotalCost, Status FROM Orders"
+    query = """
+            SELECT 
+                Orders.OrderID,
+                Orders.CustomerID,
+                Users.UserName AS CustomerName,
+                Orders.TotalCost,
+                Orders.Status
+            FROM Orders
+            INNER JOIN Users ON Orders.CustomerID = Users.UserID
+        """
     cursor.execute(query)
     orders = cursor.fetchall()
     conn.close()
@@ -499,7 +524,7 @@ def get_profile(user_id):
             conn.close()
 
 @app.route('/rating/<int:book_id>', methods=['GET'])
-@require_auth()
+@require_auth(customer_only=True)
 def get_ratings(book_id):
     
     conn = get_db_connection()
@@ -515,7 +540,7 @@ def get_ratings(book_id):
     return jsonify(orders), 200
 
 @app.route('/rating', methods=['POST'])
-@require_auth()
+@require_auth(customer_only=True)
 def create_rating():
     data = request.get_json()
 
@@ -541,7 +566,7 @@ def create_rating():
     return jsonify({'message': 'Review submitted successfully'}), 201
 
 @app.route('/rating/<int:book_id>', methods=['PUT'])
-@require_auth()
+@require_auth(customer_only=True)
 def update_rating(book_id):
     data = request.get_json()
 

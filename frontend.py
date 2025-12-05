@@ -445,14 +445,16 @@ class OrdersFrame(ttk.Frame):
 
 
         # Treeview
-        self.tree = ttk.Treeview(self, columns=("OrderID", 'Customer', 'TotalCost', 'Status'), show='headings')
+        self.tree = ttk.Treeview(self, columns=("OrderID", 'CustomerID', 'CustomerName', 'TotalCost', 'Status'), show='headings')
         self.tree.heading('OrderID', text='Order ID')
-        self.tree.heading('Customer', text='Customer ID')
+        self.tree.heading('CustomerID', text='Customer ID')
+        self.tree.heading('CustomerName', text='Name')
         self.tree.heading('TotalCost', text='Total Cost')
         self.tree.heading('Status', text='Status')
         
         self.tree.column('OrderID', width=50)
-        self.tree.column('Customer', width=50)
+        self.tree.column('CustomerID', width=25),
+        self.tree.column('CustomerName', width=100)
         self.tree.column('TotalCost', width=200)
         self.tree.column('Status', width=50)
         
@@ -482,6 +484,7 @@ class OrdersFrame(ttk.Frame):
                 self.tree.insert("", "end", values=(
                     order["OrderID"],
                     order["CustomerID"],
+                    order["CustomerName"],
                     order["TotalCost"],
                     order["Status"]
                 ))
@@ -499,7 +502,7 @@ class OrdersFrame(ttk.Frame):
         
         order_id = selected_item_values[0]
 
-        if not selected_item_values[3] == 'pending':
+        if not selected_item_values[4] == 'pending':
             return
         
         auth_header_value = self.controller.get_auth_token()
@@ -1052,7 +1055,7 @@ class CustomerSearchFrame(ttk.Frame):
         super().__init__(parent)
         self.controller = controller
         
-        ttk.Label(self, text="Book Inventory Search", font=("Arial", 20, "bold")).pack(pady=20)
+        ttk.Label(self, text="book inventory search", font=("Arial", 20, "bold")).pack(pady=20)
 
         # buttons + search
         search_frame = ttk.Frame(self)
@@ -1063,8 +1066,33 @@ class CustomerSearchFrame(ttk.Frame):
         ttk.Button(search_frame, text="search", command=self.search_books).pack(side=tk.LEFT)
         ttk.Button(search_frame, text="clear search", command=self.search_clear).pack(side=tk.LEFT)
 
+
+        filter_frame = ttk.LabelFrame(self, text="Advanced Filters", padding="10 5")
+        filter_frame.pack(fill='x', padx=10, pady=(0, 10))
+
+        # Filter variables
+        self.genre_var = tk.StringVar(self)
+        self.year_var = tk.StringVar(self)
+        
+        # Genre Filter
+        ttk.Label(filter_frame, text="Genre:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
+        self.genre_entry = ttk.Entry(filter_frame, textvariable=self.genre_var, width=20)
+        self.genre_entry.grid(row=0, column=1, padx=5, pady=5, sticky='w')
+        self.genre_entry.bind('<Return>', lambda e: self.search_books())
+
+        # Year Filter
+        ttk.Label(filter_frame, text="Pub. Year:").grid(row=0, column=2, padx=15, pady=5, sticky='w')
+        self.year_entry = ttk.Entry(filter_frame, textvariable=self.year_var, width=10)
+        self.year_entry.grid(row=0, column=3, padx=5, pady=5, sticky='w')
+        self.year_entry.bind('<Return>', lambda e: self.search_books())
+
+        # Clear Filters Button
+        ttk.Button(filter_frame, text="Clear Filters", command=self.clear_filters).grid(row=0, column=4, padx=(20, 5), pady=5)
+        
+        filter_frame.grid_columnconfigure(5, weight=1)
+
         # --- Book List Treeview ---
-        columns = ("BookID", "Title", "Author", "BuyPrice", "RentPrice", "Status", "Quantity")
+        columns = ("BookID", "Title", "Author", "BuyPrice", "RentPrice", "Status", "Quantity", "Genre", "Year")
         self.tree = ttk.Treeview(self, columns=columns, show='headings')
 
         self.tree.heading('BookID', text='ID')
@@ -1074,8 +1102,12 @@ class CustomerSearchFrame(ttk.Frame):
         self.tree.heading('RentPrice', text='Rent Price')
         self.tree.heading('Status', text='Status')
         self.tree.heading('Quantity', text='Inventory')
+        self.tree.heading('Genre', text='Genre')
+        self.tree.heading('Year', text='Year')
 
-        self.tree.column('Quantity', width = 50)
+        self.tree.column('Quantity', width = 100)
+        self.tree.column('Genre', width = 100)
+        self.tree.column('Year', width = 50)
 
         self.tree.column("BookID", width=0, stretch=False)
         self.tree.column('Status', width=0, stretch=False)
@@ -1095,8 +1127,16 @@ class CustomerSearchFrame(ttk.Frame):
         # Load all books initially
         self.search_books() 
 
+    def clear_filters(self):
+        self.genre_var.set("")
+        self.year_var.set("")
+        self.search_books()
+
     def search_books(self):
         search_term = self.search_var.get().strip()
+
+        genre_filter = self.genre_var.get().strip()
+        year_filter = self.year_var.get().strip()
         
         # Clear existing entries
         for item in self.tree.get_children():
@@ -1114,6 +1154,15 @@ class CustomerSearchFrame(ttk.Frame):
             if search_term:
                 params['query'] = search_term
 
+            if genre_filter:
+                params['genre'] = genre_filter
+            if year_filter:
+                # Basic input validation for year
+                if not year_filter.isdigit() or len(year_filter) != 4:
+                    messagebox.showwarning("Input Error", "Publication Year must be a 4-digit number.")
+                    return
+                params['year'] = year_filter
+
             def task():
                 return requests.get(f"{API_BASE_URL}/books", headers={'Authorization': f'Bearer {self.controller.get_auth_token()}'}, params=params)
             def done(response, error):
@@ -1128,7 +1177,9 @@ class CustomerSearchFrame(ttk.Frame):
                             book['Buyprice'],
                             book['Rentprice'],
                             book['Status'],
-                            book['Quantity']
+                            book['Quantity'],
+                            book['Genre'],
+                            book['PublicationYear']
                         ))
                 else:
                     messagebox.showerror("API Error", f"Failed to fetch books. Status: {response.status_code}")
@@ -1396,7 +1447,7 @@ class RateBookFrame(ttk.Frame):
 
 
         def task():
-            return requests.get(f"{API_BASE_URL}/rating/{book_id}")
+            return requests.get(f"{API_BASE_URL}/rating/{book_id}", headers = {'Authorization': f'Bearer {self.controller.get_auth_token()}'})
 
         def done(response, error):
 

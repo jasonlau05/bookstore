@@ -82,7 +82,9 @@ CREATE TABLE Books (
     Buyprice DECIMAL(10,2) NOT NULL,
     Rentprice decimal(10,2) not null,
     Status varchar(50) not null,
-    Quantity int not null
+    Quantity int not null,
+    Genre varchar(100) not null,
+    PublicationYear int not null
 );
 
 CREATE TABLE Orders (
@@ -111,11 +113,11 @@ INSERT INTO Users (UserName, Password, Email, Manager) VALUES
 ('admin', '$2b$12$p4hMGKZ.YuzAyX73DgqbP.9rISmVz3ljkNSuZFRmJGCuzRBPp/bIu', 'Jason', TRUE),
 ('nimda', '$2b$12$0HSurjZan.kVEE0.JyLVxes9r85l89NYxuprrj/4WyoeYtSzlSrI2', 'eric', FALSE);
 
-insert into Books (Name, Author, Buyprice, Rentprice, Status, Quantity) values
-('The Great Gatsby', 'F. Scott Fitzgerald', 15.99, 5.00, 'in stock', 67),
-('1984', 'George Orwell', 12.50, 4.50, 'rented', 0),
-('To Kill a Mockingbird', 'Harper Lee', 18.00, 6.00, 'sold', 78),
-('Pride and Prejudice', 'Jane Austen', 10.99, 3.50, 'rented', 21);
+insert into Books (Name, Author, Buyprice, Rentprice, Status, Quantity, Genre, PublicationYear) values
+('The Great Gatsby', 'F. Scott Fitzgerald', 15.99, 5.00, 'in stock', 67, 'romance', 1978),
+('1984', 'George Orwell', 12.50, 4.50, 'rented', 0, 'scifi', 1984),
+('To Kill a Mockingbird', 'Harper Lee', 18.00, 6.00, 'sold', 78, 'history', 1927),
+('Pride and Prejudice', 'Jane Austen', 10.99, 3.50, 'rented', 21, 'history', 1977);
 
 insert into Orders (CustomerID, TotalCost, Status) values
 (1, 50.45, 'pending'),
