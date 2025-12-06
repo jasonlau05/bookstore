@@ -40,11 +40,11 @@ def require_auth(manager_only=False, customer_only=False):
             if not auth_header:
                 return jsonify({"message": "Authorization required"}), 403
 
-            # Expect "Bearer <token>"
+            # token
             if not auth_header.startswith("Bearer "):
                 return jsonify({"message": "Invalid token format"}), 401
 
-            # Extract the real JWT
+            # extract jwt
             token = auth_header.split(" ")[1]
 
             try:
@@ -54,7 +54,7 @@ def require_auth(manager_only=False, customer_only=False):
             except jwt.InvalidTokenError:
                 return jsonify({"message": "Invalid token"}), 401
 
-            # Access control checks:
+            # access control
             if manager_only and not decoded.get("manager"):
                 return jsonify({"message": "managers only"}), 403
 
@@ -186,8 +186,8 @@ def add_book():
 
     cursor = conn.cursor()
     try:
-        query = "INSERT INTO Books (Name, Author, Buyprice, Rentprice, Status, Quantity) VALUES (%s, %s, %s, %s, %s, %s)"
-        cursor.execute(query, (name, author, buy_price, rent_price, status, quantity))
+        query = "INSERT INTO Books (Name, Author, Buyprice, Rentprice, Status, Quantity, Genre, PublicationYear) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+        cursor.execute(query, (name, author, buy_price, rent_price, status, quantity, genre, publication_year))
         conn.commit()
         return jsonify({'message': f'Book "{name}" added successfully!'}), 201
     except mysql.connector.Error as err:
@@ -207,7 +207,9 @@ def update_book(book_id):
         'buyprice': 'Buyprice',
         'rentprice': 'Rentprice',
         'status': 'Status',
-        'quantity': 'Quantity'
+        'quantity': 'Quantity',
+        'genre': 'Genre',
+        'publicationyear': 'PublicationYear'
     }
     
     set_clauses = []
@@ -319,7 +321,7 @@ def get_myorders(user_id):
     return jsonify(orders), 200
 
 @app.route('/order/<int:order_id>', methods=['PUT'])
-@require_auth()
+@require_auth(manager_only=True)
 def update_order(order_id):
     data = request.get_json()
 

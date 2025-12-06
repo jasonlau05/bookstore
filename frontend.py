@@ -285,8 +285,41 @@ class BookListFrame(ttk.Frame):
         ttk.Button(header_frame, text="back", command=lambda: controller.show_frame(ManagerDashboardFrame)).pack(side='right', padx=5)
 
 
+        search_frame = ttk.Frame(self)
+        search_frame.pack(pady=10)
+                
+        self.search_var = tk.StringVar()
+        ttk.Entry(search_frame, textvariable=self.search_var, width=50).pack(side=tk.LEFT, padx=10)
+        ttk.Button(search_frame, text="search", command=self.search_books).pack(side=tk.LEFT)
+        ttk.Button(search_frame, text="clear search", command=self.search_clear).pack(side=tk.LEFT)
+
+
+        filter_frame = ttk.LabelFrame(self, text="Advanced Filters", padding="10 5")
+        filter_frame.pack(fill='x', padx=10, pady=(0, 10))
+
+        # Filter variables
+        self.genre_var = tk.StringVar(self)
+        self.year_var = tk.StringVar(self)
+        
+        # Genre Filter
+        ttk.Label(filter_frame, text="Genre:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
+        self.genre_entry = ttk.Entry(filter_frame, textvariable=self.genre_var, width=20)
+        self.genre_entry.grid(row=0, column=1, padx=5, pady=5, sticky='w')
+        self.genre_entry.bind('<Return>', lambda e: self.search_books())
+
+        # Year Filter
+        ttk.Label(filter_frame, text="Pub. Year:").grid(row=0, column=2, padx=15, pady=5, sticky='w')
+        self.year_entry = ttk.Entry(filter_frame, textvariable=self.year_var, width=10)
+        self.year_entry.grid(row=0, column=3, padx=5, pady=5, sticky='w')
+        self.year_entry.bind('<Return>', lambda e: self.search_books())
+
+        # Clear Filters Button
+        ttk.Button(filter_frame, text="Clear Filters", command=self.clear_filters).grid(row=0, column=4, padx=(20, 5), pady=5)
+        
+        filter_frame.grid_columnconfigure(5, weight=1)
+
         # Treeview
-        self.tree = ttk.Treeview(self, columns=("ID", 'Title', 'Author', 'BuyPrice', 'RentPrice', 'Status', 'Quantity'), show='headings')
+        self.tree = ttk.Treeview(self, columns=("ID", 'Title', 'Author', 'BuyPrice', 'RentPrice', 'Status', 'Quantity', 'Genre', 'Year'), show='headings')
         self.tree.heading('ID', text='ID')
         self.tree.heading('Title', text='Title')
         self.tree.heading('Author', text='Author')
@@ -294,6 +327,8 @@ class BookListFrame(ttk.Frame):
         self.tree.heading('RentPrice', text='Rent Price')
         self.tree.heading('Status', text='Status')
         self.tree.heading('Quantity', text='Inventory')
+        self.tree.heading('Genre', text='Genre')
+        self.tree.heading('Year', text='Year')
         
         self.tree.column('ID', width=50)
         self.tree.column('Title', width=300)
@@ -305,7 +340,7 @@ class BookListFrame(ttk.Frame):
         
         self.tree.pack(fill='both', expand=True, padx=10, pady=5)
         
-        self.load_books()
+        self.search_books()
 
     def load_books(self):
         for row in self.tree.get_children():
@@ -328,7 +363,9 @@ class BookListFrame(ttk.Frame):
                         book["Buyprice"],
                         book["Rentprice"],
                         book["Status"],
-                        book["Quantity"]
+                        book["Quantity"],
+                        book["Genre"],
+                        book["PublicationYear"]
                     ))
         
         self.controller.run_async(task, done)
@@ -344,7 +381,72 @@ class BookListFrame(ttk.Frame):
     def logout(self):
         self.controller.set_auth_token(None)
         self.controller.show_frame(MainLoginSelector)
-  
+
+    def clear_filters(self):
+        self.genre_var.set("")
+        self.year_var.set("")
+        self.search_books()
+
+    def search_books(self):
+        search_term = self.search_var.get().strip()
+
+        genre_filter = self.genre_var.get().strip()
+        year_filter = self.year_var.get().strip()
+        
+        # Clear existing entries
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        try:
+            auth_header_value = self.controller.get_auth_token()
+            if not auth_header_value:
+                messagebox.showerror("Error", "Authentication token is missing.")
+                return
+
+            headers = {'Authorization': f'Bearer {auth_header_value}'}
+            
+            params = {}
+            if search_term:
+                params['query'] = search_term
+
+            if genre_filter:
+                params['genre'] = genre_filter
+            if year_filter:
+                # Basic input validation for year
+                if not year_filter.isdigit() or len(year_filter) != 4:
+                    messagebox.showwarning("Input Error", "Publication Year must be a 4-digit number.")
+                    return
+                params['year'] = year_filter
+
+            def task():
+                return requests.get(f"{API_BASE_URL}/books", headers={'Authorization': f'Bearer {self.controller.get_auth_token()}'}, params=params)
+            def done(response, error):
+                if response.status_code == 200:
+                    books = response.json()
+                    
+                    for book in books:
+                        self.tree.insert("", "end", values=(
+                            book['BookID'],
+                            book['Name'],
+                            book['Author'],
+                            book['Buyprice'],
+                            book['Rentprice'],
+                            book['Status'],
+                            book['Quantity'],
+                            book['Genre'],
+                            book['PublicationYear']
+                        ))
+                else:
+                    messagebox.showerror("API Error", f"Failed to fetch books. Status: {response.status_code}")
+            self.controller.run_async(task, done)
+
+        except requests.exceptions.RequestException as e:
+            messagebox.showerror("Network Error", f"Could not connect to the API server: {e}")
+    
+    def search_clear(self):
+        self.search_var.set("")
+        self.search_books()
+
 class AddBookFrame(ttk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
@@ -356,7 +458,7 @@ class AddBookFrame(ttk.Frame):
         form_block = ttk.Frame(self, padding="20 20 20 20", relief="groove")
         form_block.pack(pady=50, padx=50)
 
-        fields = ['Title', 'Author', 'Buy Price', 'Rent Price', 'Quantity']
+        fields = ['Title', 'Author', 'Buy Price', 'Rent Price', 'Quantity', 'Genre', 'Publication Year']
         self.entries = {}
         
         for i, field in enumerate(fields):
@@ -378,7 +480,9 @@ class AddBookFrame(ttk.Frame):
             'author': self.entries['author'].get(),
             'buy_price': self.entries['buy_price'].get(),
             'rent_price': self.entries['rent_price'].get(),
-            'quantity': self.entries['quantity'].get()
+            'quantity': self.entries['quantity'].get(),
+            'genre': self.entries['genre'].get(),
+            'publication_year': self.entries['publication_year'].get()
         }
         
         # basic validation
@@ -412,7 +516,7 @@ class MainLoginSelector(ttk.Frame):
         super().__init__(parent)
         self.controller = controller
 
-        ttk.Label(self, text="jason's bookstore",
+        ttk.Label(self, text="BANANAZON.COM",
                   font=("Arial", 20, "bold")).pack(pady=40)
 
         ttk.Button(self, text="customer login",
@@ -769,7 +873,7 @@ class EditBookFrame(ttk.Frame):
         self.book = book
 
         # unpack
-        book_id, title, author, buy, rent, status, quantity = book
+        book_id, title, author, buy, rent, status, quantity, genre, publication_year = book
 
         ttk.Label(self, text=f"Edit Book Info (ID: {book_id})", font=("Arial", 18, "bold")).pack(pady=20)
 
@@ -778,7 +882,7 @@ class EditBookFrame(ttk.Frame):
 
         self.entries = {}
         fields = [("Title", title), ("Author", author),
-                  ("Buy Price", buy), ("Rent Price", rent), ("Quantity", quantity)]
+                  ("Buy Price", buy), ("Rent Price", rent), ("Quantity", quantity), ("Genre", genre), ("Publication Year", publication_year)]
 
         for i, (label, value) in enumerate(fields):
             ttk.Label(frame, text=label).grid(row=i, column=0, pady=5, sticky='w')
@@ -798,7 +902,9 @@ class EditBookFrame(ttk.Frame):
             "author": self.entries["Author"].get(),
             "buyprice": self.entries["Buy Price"].get(),
             "rentprice": self.entries["Rent Price"].get(),
-            "quantity": self.entries["Quantity"].get()
+            "quantity": self.entries["Quantity"].get(),
+            "genre": self.entries["Genre"].get(),
+            "publicationyear": self.entries["Publication Year"].get()
         }
 
         # get auths
@@ -1108,6 +1214,8 @@ class CustomerSearchFrame(ttk.Frame):
         self.tree.column('Quantity', width = 100)
         self.tree.column('Genre', width = 100)
         self.tree.column('Year', width = 50)
+        self.tree.column('BuyPrice', width = 100)
+        self.tree.column('RentPrice', width = 100)
 
         self.tree.column("BookID", width=0, stretch=False)
         self.tree.column('Status', width=0, stretch=False)
@@ -1398,7 +1506,7 @@ class RateBookFrame(ttk.Frame):
 
         if self.book_data:
             # Assuming book_data structure: (book_id, title, author, buy, rent, status)
-            self.book_id, self.title, self.author, _, _, _, _ = self.book_data
+            self.book_id, self.title, self.author, _, _, _, _, _, _ = self.book_data
         else:
             self.book_id = None
             self.title = "Unknown Book"
